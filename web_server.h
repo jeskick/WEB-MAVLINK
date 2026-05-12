@@ -122,6 +122,11 @@ inline void initWebServer() {
     html += ".mode-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;}";
     html += ".mode-item{display:flex;align-items:center;gap:10px;}";
     html += ".mode-item select{padding:5px;border:1px solid #ddd;border-radius:3px;}";
+    html += ".fltmode-row{display:flex;align-items:center;gap:5px;margin:3px 0;}";
+    html += ".fltmode-lbl{min-width:44px;font-size:12px;flex-shrink:0;}";
+    html += ".fltmode-mid{flex:1;min-width:0;display:flex;flex-direction:row;align-items:center;gap:4px;}";
+    html += ".fltmode-sel{flex:1;border:1px solid #ddd;border-radius:3px;font-size:12px;min-width:0;max-width:70px;box-sizing:border-box;padding:2px 4px;}";
+    html += ".fltmode-pwm-band{font-size:9px;line-height:1;font-weight:400;color:#888;white-space:nowrap;pointer-events:none;user-select:none;text-align:right;}";
     html += ".message-box{background:#e9ecef;padding:15px;border-radius:5px;margin-top:20px;min-height:50px;}";
     html += ".message-box h4{margin:0 0 10px 0;color:#495057;}";
     html += ".message-box p{margin:0;color:#6c757d;}";
@@ -141,6 +146,9 @@ inline void initWebServer() {
     html += ".row.space-between .col{flex:none;}";
     html += ".az-bar{justify-content:center;}";
     html += ".az-bar button{padding:2px 2px;font-size:12px;}";
+    html += ".fltmode-mid{flex-direction:column;align-items:stretch;gap:0;}";
+    html += ".fltmode-sel{max-width:none;width:100%;}";
+    html += ".fltmode-pwm-band{font-size:8px;text-align:left;line-height:1;margin:0;padding:0;}";
     html += "}";
     
     /* 确保电压、模式、GPS在一排显示 */
@@ -206,18 +214,25 @@ inline void initWebServer() {
     html += "<div style='padding:2px;'>";
     html += "<div style='display:grid;grid-template-columns:repeat(2,1fr);gap:5px;'>";
     html += "<div style='grid-column:1/-1;font-size:13px;margin:0 0 6px 0;'>FLYMODEL_CH : <strong id='fltmodeChDisp'>--</strong> &nbsp;&nbsp; PWM : <strong id='fltmodePwmDisp'>--</strong></div>";
+    const uint16_t ap6_lo[6]  = { 0, 1231, 1361, 1491, 1621, 1750 };
+    const uint16_t ap6_hi[5] = { 1230, 1360, 1490, 1620, 1749 };
     for (int i = 0; i < FLTMODE_PARAM_COUNT; ++i) {
       int cur = paramMap.count(FLTMODE_PARAMS[i]) ? (int)paramMap[FLTMODE_PARAMS[i]] : 0;
-      html += "<div style='display:flex;align-items:center;gap:5px;margin:3px 0;'>";
-      html += "<label style='min-width:20px;font-size:12px;flex-shrink:0;'>Mode" + String(i+1) + ":</label>";
-      html += "<select id='fltmode" + String(i+1) + "' style='flex:1;border:1px solid #ddd;border-radius:3px;font-size:12px;min-width:0;max-width:70px;'>";
+      html += "<div class='fltmode-row'>";
+      html += "<label class='fltmode-lbl'>Mode" + String(i+1) + ":</label>";
+      html += "<div class='fltmode-mid'>";
+      html += "<select id='fltmode" + String(i+1) + "' class='fltmode-sel'>";
       for (int j = 0; j < PLANE_MODE_COUNT; ++j) {
         html += "<option value='" + String(PLANE_MODES[j].num) + "'";
         if (PLANE_MODES[j].num == cur) html += " selected";
         html += ">" + String(PLANE_MODES[j].name) + "</option>";
       }
       html += "</select>";
-      html += "</div>";
+      String spanTxt = (i < 5)
+          ? (String(ap6_lo[i]) + "-" + String(ap6_hi[i]))
+          : (String(ap6_lo[5]) + "+");
+      html += "<span class='fltmode-pwm-band'>" + spanTxt + "</span>";
+      html += "</div></div>";
     }
     html += "</div>";
     html += "<button onclick='saveModes()' style='background:#007bff;color:white;padding:8px 16px;border:none;border-radius:4px;cursor:pointer;margin-top:15px;width:100%;'>Save Modes</button>";
@@ -533,7 +548,6 @@ function toggleArmDisarm(){
     });
 }
 function saveModes(){
-  console.log('saveModes function called!');
   var params = [];
   for(var i=1;i<=6;i++){
     var val=document.getElementById('fltmode'+i).value;
