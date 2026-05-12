@@ -1,0 +1,5 @@
+编译命令  arduino-cli compile --fqbn esp32:esp32:esp32s3 .
+上传命令  arduino-cli upload --fqbn esp32:esp32:esp32s3 --port COM8 .
+串口监视  arduino-cli monitor --port COM8 --fqbn esp32:esp32:esp32s3
+
+查看串口  arduino-cli board list

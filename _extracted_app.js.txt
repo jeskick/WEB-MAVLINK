@@ -1,0 +1,443 @@
+﻿var levelCalibrated = false;
+var accelCalibrated = false;
+
+// 记录最近一条PreArm消息
+let lastPreArmMsg = "";
+
+function updateStatus(){
+  fetch('/api/status').then(r=>r.json()).then(data=>{
+    document.getElementById('sysmsg').textContent=data.systemMessage;
+    document.getElementById('voltage').textContent=data.voltage+'V';
+    document.getElementById('flightMode').textContent=data.flightMode;
+    document.getElementById('gpsCount').textContent=data.gpsCount;
+    document.getElementById('opmsg').textContent=data.operationMessage;
+    document.getElementById('armBtn').textContent=data.isArmed?'Disarm':'Un/lock';
+    
+    // 记录最近一条PreArm消息
+    if (data.systemMessage && data.systemMessage.startsWith('PreArm:')) {
+      lastPreArmMsg = data.systemMessage;
+    }
+    
+    // 更新ARM/DISARM按钮状态
+    updateArmDisarmButton(data.isArmed);
+    
+    // 更新水平校准按钮状态
+    if (data.levelCalibrated) {
+      levelCalibrated = true;
+      let levelBtn = document.getElementById('level-cal-btn');
+      if (levelBtn) {
+        levelBtn.disabled = true;
+        levelBtn.textContent = 'Level Calibrated';
+        levelBtn.style.background = '#888';
+      }
+    }
+    
+    // 更新加速度计校准按钮状态
+    if (data.accelCalibrated) {
+      accelCalibrated = true;
+      let accelBtn = document.getElementById('accel-cal-btn');
+      if (accelBtn) {
+        accelBtn.disabled = true;
+        accelBtn.textContent = 'Accel Calibrated';
+        accelBtn.style.background = '#888';
+      }
+    }
+    
+    // 更新参数加载状态和进度条
+    updateParamLoadingStatus(data);
+  }).catch(err=>{
+    console.error('Status update failed:', err);
+  });
+}
+
+// 新增：更新参数加载状态和进度条
+function updateParamLoadingStatus(data) {
+  var azBar = document.querySelector('.az-bar');
+  var paramStatus = document.getElementById('paramStatus');
+  var paramInput = document.getElementById('paramInput');
+  var setParamBtn = document.querySelector("button[onclick='setParam()']");
+  var paramProgress = document.getElementById('paramProgress');
+  var paramText = document.getElementById('paramText');
+  
+  if(data.paramReady) {
+    // 参数加载完成
+    azBar.style.display = 'flex';
+    paramProgress.style.width = '100%';
+    paramText.textContent = 'Total parameters: ' + data.paramTotal;
+    paramText.style.color = '#28a745';
+    paramInput.disabled = false;
+    setParamBtn.disabled = false;
+  } else {
+    // 参数加载中
+    azBar.style.display = 'none';
+    paramInput.disabled = true;
+    setParamBtn.disabled = true;
+    
+    // 计算进度
+    if (data.paramTotal && data.paramTotal > 0) {
+      var progress = (data.paramReceived / data.paramTotal) * 100;
+      paramProgress.style.width = progress + '%';
+      paramText.textContent = 'Loading parameters... ' + data.paramReceived + '/' + data.paramTotal;
+      paramText.style.color = '#ffc107';
+    } else {
+      paramProgress.style.width = '0%';
+      paramText.textContent = 'Loading parameters...';
+      paramText.style.color = '#ffc107';
+    }
+    
+    // 清空参数列表
+    document.getElementById('paramList').innerHTML = "";
+  }
+}
+
+function showTab(idx){
+  var tabs=document.querySelectorAll('.tab');
+  var contents=document.querySelectorAll('.tab-content');
+  for(var i=0;i<tabs.length;i++){
+    if(i==idx){tabs[i].classList.add('active');contents[i].classList.add('active');}
+    else{tabs[i].classList.remove('active');contents[i].classList.remove('active');}
+  }
+  // 切换到Servo Out时加载完整表格
+  if(idx==1){
+    loadServoOutputContent();
+  }
+}
+function setParam(){
+  // 检查参数是否加载完成
+  fetch('/api/status').then(r=>r.json()).then(data=>{
+    if(!data.paramReady) {
+      document.getElementById('opmsg').textContent = 'Parameters are not fully loaded, please wait...';
+      return;
+    }
+    
+    var v=document.getElementById('paramInput').value;
+    fetch('/api/set_param?input='+encodeURIComponent(v)).then(r=>r.text()).then(t=>{
+      document.getElementById('opmsg').textContent=t;
+    });
+  });
+}
+function loadParams(letter){
+  // 检查参数是否加载完成
+  fetch('/api/status').then(r=>r.json()).then(data=>{
+    if(!data.paramReady) {
+      document.getElementById('opmsg').textContent = 'Parameters are not fully loaded, please wait...';
+      return;
+    }
+    
+    fetch('/api/params_by_letter?letter='+letter).then(r=>r.json()).then(data=>{
+      var params="";
+      for(var key in data.parameters){
+        params+=key+'='+data.parameters[key]+'<br>';
+      }
+      document.getElementById('paramList').innerHTML=params;
+      
+      // 显示当前字母参数的总数
+      var paramText = document.getElementById('paramText');
+      if (paramText) {
+        paramText.textContent = 'Letter ' + letter + ' total parameters: ' + data.count;
+        paramText.style.color = '#007bff';
+      }
+    });
+  });
+}
+function calib(type){
+  fetch('/api/calib/'+type,{method:'POST'}).then(r=>r.json()).then(data=>{
+    document.getElementById('opmsg').textContent=data.message;
+  });
+}
+function toggleArmDisarm(){
+  let button = document.getElementById('armBtn');
+  
+  // 直接使用服务器返回的isArmed状态，而不是根据按钮颜色判断
+  // 获取当前状态
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(data => {
+      let isCurrentlyArmed = data.isArmed;
+      
+      // 发送相反的命令：如果当前是上锁状态，发送解锁命令；如果当前是解锁状态，发送上锁命令
+      let action = isCurrentlyArmed ? 0 : 1; // 0=上锁, 1=解锁
+      
+      // 显示操作消息
+      document.getElementById('opmsg').textContent = action === 1 ? 'Sending ARM command...' : 'Sending DISARM command...';
+      
+      // 如果是解锁命令，立即开始监听错误消息
+      if (action === 1) {
+        // 清空之前的错误
+        fetch('/clear_arm_errors')
+          .catch(err => {
+            console.error('Failed to clear arm errors:', err);
+          });
+        
+        // 清除之前的定时器（如果存在）
+        if (window.errorCheckInterval) {
+          clearInterval(window.errorCheckInterval);
+          window.errorCheckInterval = null;
+        }
+        
+        // 添加标志防止重复显示弹窗
+        window.errorModalShown = false;
+        
+        // 立即开始检查错误消息
+        window.errorCheckInterval = setInterval(() => {
+          checkArmErrors();
+        }, 500); // 每500ms检查一次
+        
+        // 5秒后停止检查
+        setTimeout(() => {
+          if (window.errorCheckInterval) {
+            clearInterval(window.errorCheckInterval);
+            window.errorCheckInterval = null;
+          }
+        }, 5000);
+      }
+      
+      // 发送ARM/DISARM命令
+      return fetch('/arm_disarm?action=' + action);
+    })
+    .then(r => r.json())
+    .then(data => {
+      console.log('Arm/Disarm response:', data);
+      
+      // 更新操作消息
+      let action = data.action;
+      document.getElementById('opmsg').textContent = action === 1 ? 'ARM command sent' : 'DISARM command sent';
+      
+      // 更新按钮颜色
+      setTimeout(() => {
+        updateArmDisarmButtonColor();
+      }, 2000);
+
+      // 只要armDenied为true就弹窗
+      if (data.armDenied === true || data.armDenied === 'true') {
+        showForceArmDialog();
+      }
+    })
+    .catch(err => {
+      document.getElementById('opmsg').textContent = 'ARM/DISARM failed: ' + err.message;
+    });
+}
+function saveModes(){
+  console.log('saveModes function called!');
+  var params = [];
+  for(var i=1;i<=6;i++){
+    var val=document.getElementById('fltmode'+i).value;
+    params.push('FLTMODE'+i+'='+val);
+  }
+  function setNext(idx) {
+    if(idx >= params.length) return;
+    fetch('/api/set_param?input='+params[idx])
+      .then(r=>r.text())
+      .then(t=>{
+        document.getElementById('opmsg').textContent=t;
+        setTimeout(()=>setNext(idx+1), 400);
+      });
+  }
+  setNext(0);
+}
+
+function loadServoOutputContent(){
+  fetch('/servo_output').then(r=>r.text()).then(html=>{
+    document.getElementById('servo-table-container').innerHTML=html;
+    document.getElementById('servo-loading').style.display='none';
+    document.getElementById('servo-table-container').style.display='block';
+    startServoOutputUpdate();
+  });
+}
+function startServoOutputUpdate(){
+  setInterval(()=>{
+    fetch('/servo_positions').then(r=>r.json()).then(data=>{
+      for(var i=1;i<=13;i++){
+        var posSpan=document.getElementById('servo'+i+'_pos');
+        if(posSpan) posSpan.textContent=data['servo'+i];
+      }
+    }).catch(err=>console.error('Failed to update servo positions:',err));
+  },500);
+}
+function updateServoParam(servoNum,param,value){
+  var paramName='SERVO'+servoNum+'_'+param;
+  fetch('/api/set_param?input='+encodeURIComponent(paramName+'='+value)).then(r=>r.text()).then(t=>{
+    document.getElementById('opmsg').textContent=t;
+  });
+}
+
+// 校准功能函数
+function calibrateLevel(){
+  if (levelCalibrated) {
+    console.log('Level already calibrated, button should be disabled');
+    return;
+  }
+  
+  fetch('/calibrate_level').then(r=>r.text()).then(t=>{
+    document.getElementById('opmsg').textContent=t;
+    console.log('Level calibration response:', t);
+    
+    // 检查是否校准完成，使用旧代码的逻辑
+    if (t.includes('success') || t.includes('completed') || t.includes('Trim OK')) {
+      levelCalibrated = true;
+      let levelBtn = document.getElementById('level-cal-btn');
+      if (levelBtn) {
+        levelBtn.disabled = true;
+        levelBtn.textContent = 'Level Calibrated';
+        levelBtn.style.background = '#888';
+        console.log('Level button disabled based on success/completed text');
+      }
+    }
+  }).catch(err=>{
+    document.getElementById('opmsg').textContent='Level calibration failed: '+err.message;
+  });
+}
+
+function calibrateAccel(){
+  if (accelCalibrated) {
+    console.log('Accel already calibrated, button should be disabled');
+    return;
+  }
+  
+  fetch('/calibrate_accel').then(r=>r.text()).then(t=>{
+    document.getElementById('opmsg').textContent=t;
+    console.log('Accel calibration response:', t);
+    
+    let accelBtn = document.getElementById('accel-cal-btn');
+    if (accelBtn) {
+      // 如果正在校准中，改变按钮文本
+      if (t.includes('started') || t.includes('waiting') || t.includes('Place vehicle')) {
+        accelBtn.textContent = 'Confirm Position';
+      } else if (t.includes('confirmed')) {
+        accelBtn.textContent = 'Calibrate Accel';
+      } else if (t.includes('success') || t.includes('completed') || t.includes('Calibration OK')) {
+        // 如果校准成功，禁用按钮
+        accelCalibrated = true;
+        accelBtn.disabled = true;
+        accelBtn.textContent = 'Accel Calibrated';
+        accelBtn.style.background = '#888';
+        console.log('Accel button disabled based on success/completed text');
+      }
+    }
+  }).catch(err=>{
+    document.getElementById('opmsg').textContent='Accel calibration failed: '+err.message;
+  });
+}
+
+function checkArmErrors(){
+  fetch('/arm_errors').then(r=>r.json()).then(errors=>{
+    let errorDiv=document.getElementById('arm-errors');
+    if(errors.length>0){
+      errorDiv.innerHTML='<strong>ARM errors:</strong><br>'+errors.join('<br>');
+    }else{
+      errorDiv.innerHTML='<strong>No ARM errors</strong>';
+    }
+  }).catch(err=>{
+    document.getElementById('arm-errors').innerHTML='Check errors failed: '+err.message;
+  });
+}
+
+function clearArmErrors(){
+  fetch('/clear_arm_errors').then(r=>r.text()).then(t=>{
+    document.getElementById('arm-errors').innerHTML='<strong>Errors cleared</strong>';
+    document.getElementById('opmsg').textContent=t;
+  }).catch(err=>{
+    document.getElementById('opmsg').textContent='Clear errors failed: '+err.message;
+  });
+}
+
+function updateArmDisarmButton(isArmed){
+  let btn=document.getElementById('armBtn');
+  if(isArmed){
+    btn.textContent='DISARM';
+    btn.style.background='#28a745'; // 绿色，已解锁
+    btn.style.color='#fff';
+  }else{
+    btn.textContent='ARM';
+    btn.style.background='#dc3545'; // 红色，未解锁
+    btn.style.color='#fff';
+  }
+}
+
+function updateArmDisarmButtonColor() {
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(data => {
+      let button = document.getElementById('armBtn');
+      if (data.isArmed) {
+        // 解锁状态，按钮变黄色
+        button.style.backgroundColor = '#ffff00'; // 黄色
+      } else {
+        // 上锁状态，按钮变红色
+        button.style.backgroundColor = '#dc3545'; // 红色
+      }
+    })
+    .catch(err => {
+      console.error('Failed to update button color:', err);
+    });
+}
+
+// 悬浮弹窗HTML
+function showForceArmDialog() {
+  if (document.getElementById('force-arm-dialog')) return;
+  let dialog = document.createElement('div');
+  dialog.id = 'force-arm-dialog';
+  dialog.style.position = 'fixed';
+  dialog.style.left = '50%';
+  dialog.style.top = '30%';
+  dialog.style.transform = 'translate(-50%, -50%)';
+  dialog.style.background = '#222';
+  dialog.style.color = '#fff';
+  dialog.style.padding = '16px 18px 10px 18px';
+  dialog.style.borderRadius = '8px';
+  dialog.style.boxShadow = '0 2px 12px rgba(0,0,0,0.18)';
+  dialog.style.zIndex = 9999;
+  dialog.style.textAlign = 'center';
+  dialog.style.minWidth = '260px';
+  dialog.innerHTML = `
+    <div style='font-size:16px;font-weight:bold;margin-bottom:6px;color:#ff0;'>⚠️ Arm failed</div>
+    <div style='font-size:13px;margin-bottom:10px;line-height:1.5;'>
+      Force Arm can bypass safety checks, which can lead to the vehicle crashing and causing serious injuries.<br>Do you wish to Force Arm?
+    </div>
+    <div style='display:flex;justify-content:center;gap:12px;margin-top:6px;'>
+      <button id='force-arm-confirm' style='background:#8f0;color:#222;font-weight:bold;padding:5px 16px;border:none;border-radius:4px;cursor:pointer;'>Force Arm</button>
+      <button id='force-arm-cancel' style='background:#888;color:#fff;padding:5px 16px;border:none;border-radius:4px;cursor:pointer;'>Cancel</button>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+  document.getElementById('force-arm-cancel').onclick = function() {
+    dialog.remove();
+  };
+  document.getElementById('force-arm-confirm').onclick = function() {
+    dialog.remove();
+    fetch('/arm_disarm?action=1&force=1').then(r=>r.json()).then(data=>{
+      if (data.armDenied === true || data.armDenied === 'true') {
+        document.getElementById('opmsg').textContent = 'Force Arm was also denied by the autopilot!';
+      } else {
+        document.getElementById('opmsg').textContent = 'Force Arm command sent.';
+      }
+      setTimeout(()=>{ updateArmDisarmButtonColor(); }, 2000);
+    });
+  };
+}
+
+// 启动定时器
+setInterval(updateStatus,1000);
+updateStatus();
+
+// 页面加载时检查校准状态
+window.addEventListener('load', function() {
+  console.log('Page loaded, checking calibration status...');
+  // 延迟一点时间确保DOM完全加载
+  setTimeout(function() {
+    let levelBtn = document.getElementById('level-cal-btn');
+    if (levelBtn && levelBtn.textContent === 'Level Calibrated') {
+      levelCalibrated = true;
+      levelBtn.disabled = true;
+      levelBtn.style.background = '#888';
+      levelBtn.style.color = '#fff';
+      levelBtn.style.cursor = 'not-allowed';
+      levelBtn.onclick = null;
+      levelBtn.removeAttribute('onclick');
+      console.log('Level button disabled on page load');
+    }
+    
+    // 更新ARM/DISARM按钮颜色
+    updateArmDisarmButtonColor();
+  }, 1000);
+});
