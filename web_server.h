@@ -106,6 +106,8 @@ inline void initWebServer() {
     html += ".param-input{display:flex;gap:10px;margin-bottom:15px;}";
     html += ".param-input input{flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;}";
     html += ".param-list{background:#f8f9fa;padding:15px;border-radius:5px;max-height:300px;overflow-y:auto;}";
+    html += ".param-row{cursor:pointer;padding:3px 6px;margin:2px 0;border-radius:4px;text-align:left;font-family:monospace;font-size:12px;line-height:1.35;}";
+    html += ".param-row:hover{background:#e3f2fd;}";
     html += ".servo-table{width:100%;border-collapse:collapse;margin-top:15px;}";
     html += ".servo-table th,.servo-table td{border:1px solid #ddd;padding:8px;text-align:center;}";
     html += ".servo-table th{background:#f8f9fa;}";
@@ -235,7 +237,7 @@ inline void initWebServer() {
       html += "<button class='az-btn' onclick=\"loadParams('" + String(c) + "')\" id='az" + String(c) + "'>" + String(c) + "</button>";
     }
     html += "</div>";
-    html += "<div id='paramList'></div>";
+    html += "<div id='paramList' class='param-list'></div>";
     html += "<div id='paramStatus' style='text-align:center;margin:10px 0;'>";
     html += "<div style='background:#f0f0f0;border-radius:10px;height:18px;overflow:hidden;margin:10px 0;'>";
     html += "<div id='paramProgress' style='background:#007bff;height:100%;width:0%;transition:width 0.3s;'></div>";
@@ -363,6 +365,39 @@ function updateParamLoadingStatus(data) {
   }
 }
 
+function copyParamLineToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).catch(function(){ fallbackCopyParam(text); });
+    return;
+  }
+  fallbackCopyParam(text);
+}
+function fallbackCopyParam(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly','');
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch(e) {}
+  document.body.removeChild(ta);
+}
+(function bindParamListCopyDelegation(){
+  var pl = document.getElementById('paramList');
+  if (!pl || pl._paramCopyBound) return;
+  pl._paramCopyBound = true;
+  pl.addEventListener('click', function(ev){
+    var row = ev.target.closest('.param-row');
+    if (!row) return;
+    var t = (row.textContent || '').trim();
+    if (!t) return;
+    copyParamLineToClipboard(t);
+    var op = document.getElementById('opmsg');
+    if (op) op.textContent = 'Copied: ' + t;
+  });
+})();
+
 function showTab(idx){
   var tabs=document.querySelectorAll('.tab');
   var contents=document.querySelectorAll('.tab-content');
@@ -398,11 +433,18 @@ function loadParams(letter){
     }
     
     fetch('/api/params_by_letter?letter='+letter).then(r=>r.json()).then(data=>{
-      var params="";
-      for(var key in data.parameters){
-        params+=key+'='+data.parameters[key]+'<br>';
+      function escHtml(s){
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       }
-      document.getElementById('paramList').innerHTML=params;
+      var html = '';
+      for(var key in data.parameters){
+        if(!Object.prototype.hasOwnProperty.call(data.parameters,key)) continue;
+        var v = data.parameters[key];
+        if(typeof v === 'number') v = String(v);
+        var line = key + '=' + v;
+        html += '<div class="param-row" title="Click to copy line">' + escHtml(line) + '</div>';
+      }
+      document.getElementById('paramList').innerHTML = html;
       
       // 显示当前字母参数的总数
       var paramText = document.getElementById('paramText');
