@@ -4,7 +4,7 @@
 
 仓库：<https://github.com/jeskick/WEB-MAVLINK>
 
-**更细的源码说明**见 [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)。
+**更细的源码说明**见 [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md)。**HTTP 路由全表**见 [docs/HTTP_API.md](docs/HTTP_API.md)。
 
 ---
 
@@ -58,7 +58,8 @@ WEB-Mavlink/
 ├── arduino-cli           # 命令备忘
 ├── tools/                # 维护脚本
 ├── docs/
-│   └── PROJECT_STRUCTURE.md
+│   ├── PROJECT_STRUCTURE.md
+│   └── HTTP_API.md
 ├── c_library_v2-master/  # MAVLink v2 C 库（ardupilotmega 等）
 └── README.md
 ```
@@ -96,16 +97,9 @@ WEB-Mavlink/
 
 ---
 
-## HTTP API（常见路径）
+## HTTP API
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/` | 主控制台页面 |
-| GET | `/api/status` | JSON：电压、模式、GPS、解锁、`fltmodeCh`、`fltmodePwm`、校准标志等 |
-| GET | `/api/params_by_letter?letter=A` | 某字母开头参数名与值 |
-| GET | `/api/set_param?input=NAME=1` | 查询或设置参数（支持多条，逗号分隔） |
-
-更多路由见 `web_server.h` 中 `server.on` 注册处。
+完整列表、参数说明与页面调用对应关系见 **[docs/HTTP_API.md](docs/HTTP_API.md)**。
 
 ---
 

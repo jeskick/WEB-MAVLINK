@@ -72,7 +72,7 @@
   - **Tab「Servo Out」**：舵机参数表与实时位置轮询。
 - **`/api/status`**：JSON 中含 `fltmodeCh`、`fltmodePwm`、`fltmodePwmValid` 等，供页眉「当前模式通道 / 当前 PWM」刷新。
 
-扩展新功能时：在 `initWebServer()` 内增加 `server.on(...)`，必要时在 `mavlink_handler.h` 增加发送/解析分支。
+扩展新功能时：在 `initWebServer()` 内增加 `server.on(...)`，必要时在 `mavlink_handler.h` 增加发送/解析分支。已登记路由见 [HTTP_API.md](HTTP_API.md)。
 
 ---
 
