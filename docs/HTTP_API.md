@@ -15,7 +15,7 @@
 | 方法 | 路径 | 查询参数 / 体 | 响应类型 | 说明 |
 |------|------|---------------|----------|------|
 | GET | `/` | — | `text/html` | 主控制台单页：系统消息、遥测、参数 A–Z、FLYMODEL / Servo Out 标签页、校准与解锁等。 |
-| GET | `/api/status` | — | `application/json` | `systemMessage`、`operationMessage`、`voltage`、`flightMode`、`gpsCount`、`fltmodeCh`、`fltmodePwm`、`fltmodePwmValid`、`isArmed`、`paramReady`、`paramTotal`、`paramReceived`、`levelCalibrated`、`accelCalibrated`、`armDenied`。字符串字段经 JSON 转义。 |
+| GET | `/api/status` | — | `application/json` | 原有遥测字段，另含 `fcLink`、`uartRx`、`uartTx`、`uartSwapped`、`baud`。字符串字段经 JSON 转义。 |
 | GET | `/api/params_by_letter` | `letter`（单字符，缺省为 `A`） | `application/json` | `count` 与 `parameters` 对象：该字母开头参数名 → 当前值（来自 `paramMap`）。 |
 | GET | `/api/set_param` | `input`（必填/可为空） | `text/plain` | 见上文「说明」。结果写入 `operationMessage` 并作为响应正文返回。 |
 | GET | `/api/set_param_result` | — | `text/plain` | 返回最近一次参数设置结果文案 `lastSetResult`。 |
@@ -34,6 +34,7 @@
 | GET | `/calibration_check` | — | `application/json` | 与 `/api/calibration_check` 相同字段，**重复注册**的兼容路径。 |
 | GET | `/arm_errors` | — | `application/json` | 与 `/api/arm_errors` 相同，兼容路径。 |
 | GET | `/clear_arm_errors` | — | `text/plain` | `ARM errors cleared`；与 POST `/api/clear_arm_errors` 类似，**GET** 兼容实现。 |
+| POST | `/ota` | `multipart/form-data` 字段 `firmware`（`.bin`） | `text/plain` | 网页底部 OTA：成功返回 `OK` 后重启；失败 `OTA failed`。编译需 `PartitionScheme=min_spiffs`。 |
 
 ---
 

@@ -2,55 +2,9 @@
 #define MAVLINK_HANDLER_H
 
 #include "config.h"
-#include <c_library_v2-master/common/mavlink.h>
+#include "app_state.h"
+#include "uart_link.h"
 #include <c_library_v2-master/ardupilotmega/mavlink.h>
-
-// 外部声明
-extern HardwareSerial mavSerial;
-extern std::map<String, float> paramMap;
-extern std::set<uint16_t> paramIndexSet;
-extern uint16_t param_total;
-extern bool param_ready;
-extern unsigned long last_param_recv;
-extern String systemMessage;
-extern String operationMessage;
-extern float voltage;
-extern String flightMode;
-extern int gpsCount;
-extern bool isArmed;
-extern ServoData servoOutputs[16];
-
-// ARM/STATUSTEXT相关
-extern bool lastArmCommand;
-extern String armErrors[10];
-extern int armErrorCount;
-extern unsigned long lastStatusTextTime;
-extern String lastStatusText;
-
-// 校准状态相关
-extern CalibrationType currentCalibration;
-extern AccelCalibrationState currentAccelState;
-extern LevelCalibrationState currentLevelState;
-extern CalibrationStepState currentStepState;
-extern SimpleCalibrationStep currentSimpleStep;
-extern uint8_t currentPosition;
-extern bool waitingForAck;
-extern unsigned long lastCommandTime;
-extern bool levelCalibrated;
-extern bool accelCalibrated;
-
-// 参数设置相关
-extern String lastSetResult;
-extern unsigned long lastSetTime;
-extern std::map<String, float> pendingSetMap;
-
-// 飞行模式 RC 通道 PWM（由 RC_CHANNELS + 参数 FLTMODE_CH 更新）
-extern uint16_t rc_fltmode_pwm_us;
-extern bool rc_fltmode_pwm_valid;
-
-// 在文件顶部全局变量区添加：
-bool armDenied = false;
-bool servo_param_pump_done = false;
 
 // 飞控状态多行缓冲（STATUSTEXT 连续多条时保留，避免只记住最后一条）
 #ifndef STATUS_MSG_RING_MAX
@@ -92,6 +46,22 @@ String getCalibrationPositionMessage(uint8_t position);
 void sendMavlinkCommand(uint16_t command, float param1, float param2, float param3, float param4, float param5, float param6, float param7);
 
 // 请求参数列表
+void sendGcsHeartbeat() {
+  mavlink_message_t msg;
+  mavlink_msg_heartbeat_pack(SYS_ID, COMP_ID, &msg, MAV_TYPE_GCS, MAV_AUTOPILOT_INVALID, 0, 0, MAV_STATE_ACTIVE);
+  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+  uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+  mavSerial.write(buf, len);
+}
+
+void requestDataStreams() {
+  mavlink_message_t msg;
+  mavlink_msg_request_data_stream_pack(SYS_ID, COMP_ID, &msg, TARGET_SYS, TARGET_COMP, MAV_DATA_STREAM_ALL, 4, 1);
+  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+  uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+  mavSerial.write(buf, len);
+}
+
 void requestParamList() {
   mavlink_message_t msg;
   mavlink_msg_param_request_list_pack(SYS_ID, COMP_ID, &msg, TARGET_SYS, TARGET_COMP);
@@ -114,8 +84,14 @@ void requestParam(uint16_t index) {
 // 检查并请求缺失的参数
 void checkAndRequestMissingParams() {
   if (param_ready) return;
+  if (!fcHeartbeatSeen) return;
 
-  // 尚未收到任何 PARAM_VALUE：setup 已 stagger 发过列表，此处按快/慢间隔补发
+  if (!paramListRequestedAfterLink) {
+    paramListRequestedAfterLink = true;
+    requestParamList();
+    return;
+  }
+
   if (param_total == 0) {
     static unsigned long last_list_request = 0;
     static uint8_t list_tries = 0;
@@ -147,6 +123,10 @@ void checkAndRequestMissingParams() {
   }
   if (sent > 0) {
     last_request = millis();
+  } else if (last_param_recv > 0 && millis() - last_param_recv > PARAM_STALL_RELIST_MS) {
+    last_param_recv = millis();
+    requestParamList();
+    Serial.println("Retry: PARAM_REQUEST_LIST (stalled with gaps)");
   }
 }
 
@@ -194,6 +174,7 @@ void handleMavlink(uint16_t maxRxBytes) {
   static mavlink_status_t status;
 
   int rxBudget = (maxRxBytes == 0) ? (int)MAVLINK_RX_BYTES_PER_LOOP : (int)maxRxBytes;
+  if (!param_ready && maxRxBytes == 0) rxBudget = 4096;
   int consumed = 0;
   while (mavSerial.available() && rxBudget-- > 0) {
     uint8_t c = mavSerial.read();
@@ -204,14 +185,21 @@ void handleMavlink(uint16_t maxRxBytes) {
         case MAVLINK_MSG_ID_HEARTBEAT: {
           mavlink_heartbeat_t heartbeat;
           mavlink_msg_heartbeat_decode(&msg, &heartbeat);
-          // 飞行模式
+          if (msg.sysid == SYS_ID) break;
+          bool first = !fcHeartbeatSeen;
+          fcHeartbeatSeen = true;
+          lastFcHeartbeatMs = millis();
+          if (first) {
+            Serial.printf("FC heartbeat sys=%u comp=%u\n", msg.sysid, msg.compid);
+            requestDataStreams();
+            uartLinkSave();
+          }
           for (int i = 0; i < PLANE_MODE_COUNT; ++i) {
             if (PLANE_MODES[i].num == heartbeat.custom_mode) {
               flightMode = PLANE_MODES[i].name;
               break;
             }
           }
-          // 解锁状态
           isArmed = (heartbeat.base_mode & MAV_MODE_FLAG_SAFETY_ARMED);
           break;
         }
@@ -286,7 +274,9 @@ void handleMavlink(uint16_t maxRxBytes) {
           key[16] = '\0';
           String keyStr = String(key);
           paramMap[keyStr] = param.param_value;
-          paramIndexSet.insert(param.param_index);
+          if (param.param_index != UINT16_MAX) {
+            paramIndexSet.insert(param.param_index);
+          }
           if (param_total == 0) param_total = param.param_count;
           
           // 使用paramIndexSet.size()来判断参数是否全部接收完成

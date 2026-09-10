@@ -2,7 +2,10 @@
 #define WEB_SERVER_H
 
 #include "config.h"
+#include "app_state.h"
+#include "mavlink_handler.h"
 #include <WebServer.h>
+#include <Update.h>
 
 // WebServer 未知总长（分块响应）
 #ifndef MAVWEB_CONTENT_LENGTH_UNKNOWN
@@ -50,7 +53,7 @@ extern bool rc_fltmode_pwm_valid;
 extern ServoData servoOutputs[16];
 extern const PlaneMode PLANE_MODES[];
 extern const int PLANE_MODE_COUNT;
-extern const char* FLTMODE_PARAMS[];
+extern const int FLTMODE_PARAM_COUNT;
 extern bool lastArmCommand;
 extern int armErrorCount;
 extern HardwareSerial mavSerial;
@@ -746,6 +749,29 @@ function showForceArmDialog() {
 }
 
 // 启动定时器
+function startOta(){
+  var inp=document.getElementById('otaFile');
+  if(inp) inp.click();
+}
+function doOtaUpload(){
+  var inp=document.getElementById('otaFile');
+  var bar=document.getElementById('otaBar');
+  if(!inp||!inp.files||!inp.files[0]) return;
+  var fd=new FormData();
+  fd.append('firmware', inp.files[0]);
+  var xhr=new XMLHttpRequest();
+  xhr.open('POST','/ota');
+  xhr.upload.onprogress=function(e){
+    if(!e.lengthComputable||!bar) return;
+    bar.style.width=Math.round(e.loaded*100/e.total)+'%';
+  };
+  xhr.onload=function(){
+    if(bar) bar.style.width='100%';
+  };
+  if(bar) bar.style.width='0%';
+  xhr.send(fd);
+}
+
 setInterval(updateStatus,1000);
 updateStatus();
 
@@ -772,6 +798,13 @@ window.addEventListener('load', function() {
 });
 </script>
 )";
+    html += "<div class='ota-box' style='margin-top:24px;padding-top:12px;border-top:1px solid #dee2e6;'>";
+    html += "<input id='otaFile' type='file' accept='.bin' style='display:none' onchange='doOtaUpload()'>";
+    html += "<button type='button' class='btn-primary' onclick='startOta()' style='width:100%;padding:10px;'>OTA</button>";
+    html += "<div style='background:#f0f0f0;border-radius:8px;height:12px;overflow:hidden;margin-top:10px;'>";
+    html += "<div id='otaBar' style='background:#28a745;height:100%;width:0%;transition:width 0.15s;'></div></div>";
+    html += "</div>";
+    html += "</div>";
     html += "</body></html>";
     server.send(200, "text/html", html);
   });
@@ -799,7 +832,12 @@ window.addEventListener('load', function() {
     json += "\"paramReceived\":" + String(paramIndexSet.size()) + ",";
     json += "\"levelCalibrated\":" + String(levelCalibrated ? "true" : "false") + ",";
     json += "\"accelCalibrated\":" + String(accelCalibrated ? "true" : "false") + ",";
-    json += "\"armDenied\":" + String(armDenied ? "true" : "false");
+    json += "\"armDenied\":" + String(armDenied ? "true" : "false") + ",";
+    json += "\"fcLink\":" + String(fcHeartbeatSeen ? "true" : "false") + ",";
+    json += "\"uartRx\":" + String(mavRxPin) + ",";
+    json += "\"uartTx\":" + String(mavTxPin) + ",";
+    json += "\"uartSwapped\":" + String(uartPinsSwapped ? "true" : "false") + ",";
+    json += "\"baud\":" + String(detectedBaud);
     json += "}";
     server.send(200, "application/json", json);
   });
@@ -1158,6 +1196,8 @@ window.addEventListener('load', function() {
       operationMessage = "Sending DISARM command...";
       shouldArm = false;
     }
+    lastArmCommand = shouldArm;
+    armDenied = false;
 
     String json = "{";
     json += "\"message\":\"" + operationMessage + "\",";
@@ -1191,6 +1231,34 @@ window.addEventListener('load', function() {
   server.on("/clear_arm_errors", HTTP_GET, []() {
     armErrorCount = 0;
     server.send(200, "text/plain", "ARM errors cleared");
+  });
+
+  server.on("/ota", HTTP_POST, []() {
+    if (Update.hasError()) {
+      server.send(500, "text/plain", "OTA failed");
+    } else {
+      server.send(200, "text/plain", "OK");
+      delay(400);
+      ESP.restart();
+    }
+  }, []() {
+    HTTPUpload& upload = server.upload();
+    if (upload.status == UPLOAD_FILE_START) {
+      Serial.printf("OTA start: %s\n", upload.filename.c_str());
+      if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+      if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+        Update.printError(Serial);
+      }
+    } else if (upload.status == UPLOAD_FILE_END) {
+      if (!Update.end(true)) {
+        Update.printError(Serial);
+      } else {
+        Serial.printf("OTA success: %u bytes\n", upload.totalSize);
+      }
+    }
   });
 
   server.begin();

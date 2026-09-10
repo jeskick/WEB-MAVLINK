@@ -1,8 +1,14 @@
-# Arduino CLI / IDE build output
-build/
+# PlatformIO
+.pio/
+
+# Build artifacts — 仓库只保留最新 OTA 固件
+build/**
+!build/WEB-Mavlink.bin
 *.hex
 *.elf
+*.map
 *.bin
+!build/WEB-Mavlink.bin
 
 # IDE / OS
 .vscode/
