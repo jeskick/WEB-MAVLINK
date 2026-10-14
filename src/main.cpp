@@ -99,7 +99,7 @@ void loop() {
   updateSystemMessage();
 
   static unsigned long lastDisp = 0;
-  unsigned long interval = (uiMode == UI_MENU) ? 80 : (fcHeartbeatSeen ? 400 : 50);
+  unsigned long interval = (uiMode != UI_TELEMETRY) ? 80 : (fcHeartbeatSeen ? 400 : 50);
   if (millis() - lastDisp > interval) {
     lastDisp = millis();
     updateDisplay();

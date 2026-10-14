@@ -4,6 +4,7 @@
 #include "config.h"
 #include "app_state.h"
 #include "mavlink_handler.h"
+#include "mav_actions.h"
 #include <WebServer.h>
 #include <Update.h>
 
@@ -921,70 +922,11 @@ window.addEventListener('load', function() {
 
   // 水平校准
   server.on("/calibrate_level", HTTP_GET, []() {
-    // 检查飞控模式
-    if (flightMode != "MANUAL" && flightMode != "Manual" && flightMode != "0") {
-      Serial.println("Autopilot not in MANUAL mode. Current mode: " + flightMode);
-      operationMessage = "Autopilot must be in MANUAL mode for calibration. Current mode: " + flightMode;
-      server.send(200, "text/plain", "Autopilot must be in MANUAL mode for calibration. Current mode: " + flightMode);
-      return;
-    }
-    
-    if (currentLevelState == LEVEL_STATE_IDLE) {
-      // 步骤1：开始校准流程，提示用户放置飞机
-      Serial.println("Level calibration request received. Step 1: Start.");
-      levelCalibrated = false;
-      currentCalibration = CALIB_LEVEL;
-      currentLevelState = LEVEL_STATE_STARTED;
-      operationMessage = "Place vehicle on a level surface, then click 'Calibrate Level' again to confirm.";
-      server.send(200, "text/plain", operationMessage);
-
-    } else if (currentLevelState == LEVEL_STATE_STARTED) {
-      // 步骤2：用户已确认，发送实际的校准命令
-      Serial.println("Level calibration request received. Step 2: Confirm & Send.");
-      currentLevelState = LEVEL_STATE_WAITING_RESULT;
-      waitingForAck = true;
-      lastCommandTime = millis();
-      operationMessage = "Sending level calibration command, waiting for result...";
-
-      // 发送水平校准命令 - 按照Mission Planner的参数
-      sendMavlinkCommand(MAV_CMD_PREFLIGHT_CALIBRATION, 0, 0, 0, 0, 2, 0, 0);
-      
-      Serial.println("Level calibration command sent");
-      server.send(200, "text/plain", operationMessage);
-    }
+    server.send(200, "text/plain", actionLevelCal());
   });
-  
+
   server.on("/calibrate_accel", HTTP_GET, []() {
-    if (currentCalibration != CALIB_NONE && currentCalibration != CALIB_ACCEL) {
-      server.send(200, "text/plain", "Another calibration in progress");
-      return;
-    }
-    
-    if (currentAccelState == ACCEL_STATE_IDLE) {
-      // 开始加速度计校准 - 发送启动命令
-      currentCalibration = CALIB_ACCEL;
-      currentAccelState = ACCEL_STATE_STARTING;
-      currentPosition = 0;
-      
-      // 发送加速度计校准启动命令
-      sendMavlinkCommand(MAV_CMD_PREFLIGHT_CALIBRATION, 0, 0, 0, 0, 1, 0, 0);
-      waitingForAck = true;
-      lastCommandTime = millis();
-      
-      operationMessage = "Starting accelerometer calibration...";
-      server.send(200, "text/plain", "Starting accelerometer calibration...");
-    } else if (currentAccelState == ACCEL_STATE_POSITION_REQUESTED) {
-      // 用户确认当前位置，发送确认命令
-      sendMavlinkCommand(MAV_CMD_ACCELCAL_VEHICLE_POS, currentPosition, 0, 0, 0, 0, 0, 0);
-      currentAccelState = ACCEL_STATE_WAITING_POSITION;
-      waitingForAck = true;
-      lastCommandTime = millis();
-      operationMessage = "Position confirmed, waiting for next position...";
-      server.send(200, "text/plain", "Position confirmed, waiting for next position...");
-    } else {
-      // 其他状态，返回当前状态信息
-      server.send(200, "text/plain", operationMessage);
-    }
+    server.send(200, "text/plain", actionAccelCal());
   });
   server.on("/api/arm", HTTP_POST, []() {
     // 发送解锁指令

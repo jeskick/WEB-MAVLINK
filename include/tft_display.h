@@ -369,44 +369,94 @@ inline void drawConnectedScreen(bool forceFull) {
 
 inline void drawMenuScreen(bool forceFull) {
   static int lastIdx = -1;
+  static int lastScroll = -1;
   static String lastStatus;
+  static UiMode lastMode = UI_TELEMETRY;
   bool dirty = forceFull || buttonsConsumeMenuDirty() ||
-               menuIndex != lastIdx || menuStatus != lastStatus;
+               menuIndex != lastIdx || menuScrollTop != lastScroll ||
+               menuStatus != lastStatus || uiMode != lastMode;
   if (!dirty) return;
+
+  // 320x240：主列表 size2；无操作说明书；状态只显示真实结果
+  const int count = menuItemCount();
+  const int visible = menuVisibleRows();
+  const int rowH = 36;
+  const int listTop = 44;
+  const bool hasStatus = menuStatus.length() > 0;
+  const int statusY = SCREEN_HEIGHT - 28;
+  const int listBottom = hasStatus ? (statusY - 4) : (SCREEN_HEIGHT - 4);
 
   display.fillScreen(C_BG);
   display.fillRect(0, 0, SCREEN_WIDTH, 36, C_TELEM_BG);
   display.setTextSize(2);
   display.setTextColor(C_ACCENT, C_TELEM_BG);
-  display.setCursor(12, 10);
-  display.print("MENU (sim)");
+  display.setCursor(10, 10);
+  display.print(uiMode == UI_CONFIRM ? "CONFIRM" : "MENU");
 
-  display.setTextSize(1);
-  display.setTextColor(C_MUTED, C_BG);
-  display.setCursor(12, 44);
-  display.print("UP/DN move  LEFT back  OK confirm");
-
-  const int count = menuItemCount();
-  for (int i = 0; i < count; i++) {
-    int y = 64 + i * 28;
-    bool sel = (i == menuIndex);
-    uint16_t rowBg = sel ? C_CARD : C_BG;
-    display.fillRoundRect(8, y, SCREEN_WIDTH - 16, 24, 4, rowBg);
-    display.setTextSize(2);
-    display.setTextColor(sel ? C_WARN : C_TEXT, rowBg);
-    display.setCursor(18, y + 4);
-    if (sel) display.print("> ");
-    else display.print("  ");
-    display.print(menuItemName(i));
+  if (uiMode == UI_MENU) {
+    char page[12];
+    snprintf(page, sizeof(page), "%d/%d", menuIndex + 1, count);
+    display.setTextColor(C_MUTED, C_TELEM_BG);
+    display.setCursor(SCREEN_WIDTH - 12 - (int)strlen(page) * 12, 10);
+    display.print(page);
   }
 
-  display.setTextSize(1);
-  display.setTextColor(C_OK, C_BG);
-  display.setCursor(12, SCREEN_HEIGHT - 18);
-  display.print(tftPadLine(menuStatus, 48));
+  if (uiMode == UI_CONFIRM) {
+    display.setTextSize(2);
+    display.setTextColor(C_WARN, C_BG);
+    display.setCursor(16, 100);
+    display.print(tftPadLine(confirmTitle, 24));
+    if (hasStatus) {
+      display.setTextColor(C_OK, C_BG);
+      display.setCursor(10, statusY);
+      display.print(tftPadLine(menuStatus, 24));
+    }
+  } else {
+    int rowsFit = (listBottom - listTop) / rowH;
+    if (rowsFit < 1) rowsFit = 1;
+    int drawRows = visible < rowsFit ? visible : rowsFit;
+
+    if (menuScrollTop > 0) {
+      display.setTextSize(2);
+      display.setTextColor(C_ACCENT, C_BG);
+      display.setCursor(SCREEN_WIDTH - 20, listTop);
+      display.print("^");
+    }
+    if (menuScrollTop + drawRows < count) {
+      display.setTextSize(2);
+      display.setTextColor(C_ACCENT, C_BG);
+      display.setCursor(SCREEN_WIDTH - 20, listBottom - 18);
+      display.print("v");
+    }
+
+    for (int row = 0; row < drawRows; row++) {
+      int i = menuScrollTop + row;
+      if (i >= count) break;
+      int y = listTop + row * rowH;
+      bool sel = (i == menuIndex);
+      uint16_t rowBg = sel ? C_CARD : C_BG;
+      display.fillRoundRect(4, y, SCREEN_WIDTH - 8, rowH - 4, 5, rowBg);
+      display.setTextSize(2);
+      display.setTextColor(sel ? C_WARN : C_TEXT, rowBg);
+      display.setCursor(12, y + 8);
+      char label[28];
+      menuItemLabel(i, label, sizeof(label));
+      display.print(sel ? "> " : "  ");
+      display.print(label);
+    }
+
+    if (hasStatus) {
+      display.setTextSize(2);
+      display.setTextColor(C_OK, C_BG);
+      display.setCursor(8, statusY);
+      display.print(tftPadLine(menuStatus, 24));
+    }
+  }
 
   lastIdx = menuIndex;
+  lastScroll = menuScrollTop;
   lastStatus = menuStatus;
+  lastMode = uiMode;
 }
 
 inline void initDisplay() {
@@ -430,11 +480,11 @@ inline void initOLED() { initDisplay(); }
 
 inline void updateDisplay() {
   static UiMode lastUi = UI_TELEMETRY;
-  bool leavingMenu = (lastUi == UI_MENU && uiMode != UI_MENU);
+  bool leavingOverlay = (lastUi != UI_TELEMETRY && uiMode == UI_TELEMETRY);
   lastUi = uiMode;
 
-  if (uiMode == UI_MENU) {
-    drawMenuScreen(leavingMenu);  // entering already sets menuDirty
+  if (uiMode == UI_MENU || uiMode == UI_CONFIRM) {
+    drawMenuScreen(false);
     return;
   }
 
@@ -445,9 +495,9 @@ inline void updateDisplay() {
                 (millis() - lastFcHeartbeatMs < 5000);
 #endif
   if (!linkOk) {
-    drawLoadingScreen(!g_dispWasLoading || leavingMenu);
+    drawLoadingScreen(!g_dispWasLoading || leavingOverlay);
   } else {
-    drawConnectedScreen(g_dispWasLoading || leavingMenu);
+    drawConnectedScreen(g_dispWasLoading || leavingOverlay);
   }
 }
 
